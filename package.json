@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Spicy-API/spicy-mcp.git"
+    "url": "git+https://github.com/spicyapi-ai/spicy-mcp.git"
   },
   "homepage": "https://spicyapi.ai",
   "bugs": {
-    "url": "https://github.com/Spicy-API/spicy-mcp/issues"
+    "url": "https://github.com/spicyapi-ai/spicy-mcp/issues"
   },
   "publishConfig": {
     "access": "public"

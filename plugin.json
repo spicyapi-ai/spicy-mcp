@@ -8,7 +8,7 @@
     "url": "https://spicyapi.ai"
   },
   "homepage": "https://docs.spicyapi.ai/docs/mcp",
-  "repository": "https://github.com/Spicy-API/spicy-mcp",
+  "repository": "https://github.com/spicyapi-ai/spicy-mcp",
   "license": "MIT",
   "keywords": ["mcp", "spicyapi", "image-generation", "video-generation", "model-catalog"]
 }
