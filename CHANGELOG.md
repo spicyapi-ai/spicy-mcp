@@ -1,5 +1,34 @@
 # @spicyapi/mcp
 
+## 0.5.0
+
+### Minor Changes
+
+- `spicyapi_upload_file` takes reference documents: PDF, Word (`doc`, `docx`), Excel (`xls`,
+  `xlsx`), PowerPoint (`ppt`, `pptx`), Keynote, Pages, Numbers, plain text and Markdown, up to
+  90 MiB, for input fields such as `reference_file_url`. The service has accepted them since late
+  September, but the tool's `contentType` enum and the SDK's extension table stopped at eight media
+  types, so an agent asked to use a PDF had no way to upload it. The type is inferred from the
+  extension on this side; an unrecognised extension is refused before any request, with a message
+  that lists every extension the tool understands. The uploaded file's `contentType` in the result
+  is now an open string, so a type the service adds later cannot turn a finished upload into an
+  error.
+
+### Patch Changes
+
+- Fix `spicyapi_models_list` and `spicyapi_model_get` failing with `Output validation error` once
+  the catalogue included speech models billed per thousand characters. The output schema pinned
+  `pricing[].unit` to four values, and `per_1k_characters` made the MCP SDK reject the whole result:
+  every unfiltered listing, `modality: "audio"`, `task: "text-to-speech"`, and `model_get` on any of
+  those models. The field is now an open string that names the known units, the same treatment
+  `policyTier` received in 0.4.1.
+- `spicyapi_task_get` and `spicyapi_task_wait` say where non-file results live: `output.text` for
+  speech-to-text and other text answers, `output.transcript` for word timings, and one image per
+  layer ordered by `output.assets[].layer.zIndex` for layer decomposition.
+- The `spicyapi_tasks_list` output schema lists the optional `requestId` the service now returns.
+- README: note that a `spicy://f/…` URI from `spicyapi_upload_file` is what goes in a text model's
+  `image_url`, `video_url` or `audio_url` message part on the compatible endpoints.
+
 ## 0.4.6
 
 ### Patch Changes

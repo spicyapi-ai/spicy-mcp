@@ -1164,3 +1164,118 @@ void test("with a client that does not support elicitation, creating a task take
     await handler.close();
   }
 });
+
+void test("every live price unit survives the output schema instead of failing the call", async () => {
+  // The same failure as the policy tiers above, one field over: `pricing[].unit` was pinned to four
+  // values, and the service added `per_1k_characters` for speech models billed by the character.
+  // From then on any listing that included one of them - the unfiltered catalogue, modality=audio,
+  // task=text-to-speech - and model_get on any of them raised an Output validation error instead
+  // of returning models. One unit nobody has shipped yet rides along, so the next one cannot do it
+  // again.
+  const units = [
+    "per_image",
+    "per_second",
+    "per_request",
+    "per_1k_tokens",
+    "per_1k_characters",
+    "unit-we-have-not-shipped-yet",
+  ];
+  const items = units.map((unit, index) => ({
+    model: `maker/model-${index}/text-to-speech`,
+    family: `maker/model-${index}`,
+    displayName: `Endpoint ${index}`,
+    provider: "Model Creator",
+    modality: "audio",
+    tasks: ["text-to-speech"],
+    async: true,
+    mature: false,
+    policyTier: "filtered",
+    taskTimeoutSeconds: 600,
+    enabled: true,
+    available: true,
+    quantityField: "text",
+    pricing: [{ variant: "", unit, price: "0.06", currency: "USD" }],
+    startingPrice: { variant: "", unit, price: "0.06", currency: "USD" },
+    version: "1",
+    availability: "available",
+    badges: ["audio_output"],
+    relatedModels: [],
+    updatedAt: "2026-10-05T00:00:00Z",
+  }));
+  const characterBilled = items[4]!;
+  const fetchImplementation: typeof fetch = (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const data = url.includes("/models?") ? { total: items.length, items } : characterBilled;
+    return Promise.resolve(Response.json({ code: 200, msg: "success", request_id: "req", data }));
+  };
+  const connection = await connectMcp({
+    client: apiClient(fetchImplementation),
+    stateSecret: "0123456789abcdef0123456789abcdef",
+  });
+  try {
+    const listed = await connection.client.callTool({
+      name: "spicyapi_models_list",
+      arguments: { modality: "audio" },
+    });
+    assert.equal(listed.isError, undefined, "a live price unit must not fail the listing");
+    const returned = (
+      listed.structuredContent as {
+        result?: { items?: Array<{ pricing?: Array<{ unit?: string }> }> };
+      }
+    ).result?.items;
+    assert.deepEqual(
+      returned?.map((item) => item.pricing?.[0]?.unit),
+      units,
+      "each unit must reach the agent unchanged",
+    );
+
+    const single = await connection.client.callTool({
+      name: "spicyapi_model_get",
+      arguments: { model: characterBilled.model },
+    });
+    assert.equal(single.isError, undefined, "model_get on a character-billed model must not fail");
+    assert.equal(
+      (single.structuredContent as { result?: { startingPrice?: { unit?: string } } }).result
+        ?.startingPrice?.unit,
+      "per_1k_characters",
+    );
+
+    const tool = (await connection.client.listTools()).tools.find(
+      (candidate) => candidate.name === "spicyapi_models_list",
+    );
+    assert.match(
+      JSON.stringify(tool?.outputSchema ?? {}),
+      /per_1k_characters/,
+      "the output schema should name the known units, so an agent can read them",
+    );
+  } finally {
+    await connection.close();
+  }
+});
+
+void test("task results that are text, transcripts or layers are described where the agent reads them", async () => {
+  // Speech-to-text answers in output.text with no assets at all, and layer decomposition returns
+  // one asset per layer. The README said so, but an agent reads the tool
+  // description, and one that only knew about output.assets[].url reported finished transcriptions
+  // as having produced nothing.
+  const connection = await connectMcp({
+    client: apiClient(() => Promise.reject(new Error("API must not be called"))),
+    stateSecret: "0123456789abcdef0123456789abcdef",
+  });
+  try {
+    const tools = (await connection.client.listTools()).tools;
+    for (const name of ["spicyapi_task_get", "spicyapi_task_wait"]) {
+      const description = tools.find((tool) => tool.name === name)?.description ?? "";
+      assert.match(description, /output\.text/, `${name} does not mention output.text`);
+      assert.match(description, /transcript/, `${name} does not mention transcripts`);
+    }
+    const listing = tools.find((tool) => tool.name === "spicyapi_tasks_list");
+    assert.match(
+      JSON.stringify(listing?.outputSchema ?? {}),
+      /requestId/,
+      "the task listing schema should carry the contract's requestId",
+    );
+  } finally {
+    await connection.close();
+  }
+});

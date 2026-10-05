@@ -1,6 +1,6 @@
 {
   "name": "@spicyapi/mcp",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "description": "Official local MCP server for the SpicyAPI public API",
   "type": "module",
   "license": "MIT",

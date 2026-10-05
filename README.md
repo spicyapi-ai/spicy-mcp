@@ -314,7 +314,9 @@ and explicit link renewal, and its signed URL lasts 20 minutes.
 
 Some models answer in `output.text` rather than with a file — audio transcription is the plain case,
 an ordinary asynchronous task whose result is words. An empty `output.assets` on such a model is the
-expected shape, not a failure, so report the text instead of looking for a missing link.
+expected shape, not a failure, so report the text instead of looking for a missing link. A
+transcription may also carry `output.transcript` with word timings and the detected language, and
+layer decomposition returns one image per layer, stacked by `output.assets[].layer.zIndex`.
 
 `spicyapi_task_wait` polls adaptively by default, starting at about two seconds and backing off to
 at most ten. Set `intervalSeconds` only for a fixed interval. Waiting is bounded to 60 seconds by
@@ -355,10 +357,13 @@ this machine and commits the upload in one call, then returns the committed `spi
 a model input field. There is no separate commit tool: nothing on the MCP side ever holds a
 half-finished upload. Split-step uploads (ticket, `PUT`, commit) belong to SDK code, which finishes
 them with `commitUploadedFile`. Images (JPEG, PNG, WebP, GIF) up to 10 MiB; MP4 / WebM video and MP3
-/ WAV audio up to 90 MiB. Content type is inferred from the extension. Public HTTPS media URLs need
-no upload. Relative paths are refused; a leading `~/` (and `~\` on Windows) is expanded to the home
-directory. If the extension is not recognised, the error lists the nine it infers: `gif`, `jpeg`,
-`jpg`, `png`, `webp`, `mp4`, `webm`, `mp3`, `wav`.
+/ WAV audio up to 90 MiB; reference documents up to 90 MiB — PDF, Word, Excel, PowerPoint, Keynote,
+Pages, Numbers, plain text and Markdown — for fields such as `reference_file_url`. Content type is
+inferred from the extension. Public HTTPS media URLs need no upload. Relative paths are refused; a
+leading `~/` (and `~\` on Windows) is expanded to the home directory. If the extension is not
+recognised, nothing is uploaded and the error lists every extension the tool infers: `gif`, `jpeg`,
+`jpg`, `png`, `webp`, `mp4`, `webm`, `mp3`, `wav`, `pdf`, `doc`, `docx`, `xls`, `xlsx`, `ppt`,
+`pptx`, `key`, `pages`, `numbers`, `txt`, `md`, `markdown`.
 
 The server reads only under the user's home directory. Symlinks are resolved before the check, so a
 link pointing out of an allowed root is refused. The guard exists for prompt injection — a path that
@@ -457,7 +462,7 @@ Loopback means only programs on the same computer can connect — not other devi
 | `confirmed request state does not match the current tool arguments`      | The request changed after the question was asked; start the creation again                                                                            |
 | `40901`                                                                  | Quote expired or price changed; quote and confirm again                                                                                               |
 | `path must be absolute` / `no such file` / `may only read files under …` | Give the full path; check it exists; move the file under an allowed root                                                                              |
-| `contentType is required unless the file extension is one of: …`         | Rename the file with a listed extension, or pass `contentType`                                                                                        |
+| `cannot tell the file type from its extension; …`                        | Rename the file with a listed extension, or pass `contentType`                                                                                        |
 | `operation declined; …`                                                  | The confirmation was declined or cancelled; the message says whether only the free quote had been requested                                           |
 | `task … did not reach a terminal state within …`                         | The task is still running — wait again or look it up later; it was not cancelled                                                                      |
 
@@ -479,6 +484,11 @@ tool to add. The catalogue's text models are served by the compatible layers ins
 so a client that already speaks one of those protocols only needs its base URL pointed at SpicyAPI.
 Use native `jobs/stream` when you need quote confirmation and the platform event envelope — see the
 [chat streaming guide](https://docs.spicyapi.ai/docs/quotes-and-compatibility).
+
+Text models that read images, video or audio take them as message parts, and the `spicy://f/…` URI
+from `spicyapi_upload_file` is what goes in an `image_url`, `video_url` or `audio_url` part (video
+and audio parts are carried by Chat Completions and `jobs/stream`) — see
+[sending media to a text model](https://docs.spicyapi.ai/docs/text-and-streaming#media-input).
 
 It cannot cancel an accepted task — no public API can — and it never answers a billing confirmation
 on your behalf.

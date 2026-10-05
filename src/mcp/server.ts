@@ -23,9 +23,11 @@ import {
   SpicyApiError,
   SpicyClient,
   type SpicyClientOptions,
+  type UploadContentType,
 } from "@spicyapi/sdk";
 
 import { expandHomePath, splitUploadRoots } from "./upload-paths.js";
+import { inferUploadContentType, UPLOAD_CONTENT_TYPES } from "./upload-types.js";
 
 const SERVER_NAME = "spicyapi";
 const SERVER_VERSION = MCP_VERSION;
@@ -36,16 +38,7 @@ const confirmationSchema = z.object({ confirm: z.boolean() });
 const unknownObjectSchema = z.record(z.string(), z.unknown());
 const usdStringSchema = z.string().regex(/^-?[0-9]+(?:\.[0-9]+)?$/);
 const taskStateSchema = z.enum(["queued", "running", "succeeded", "failed", "canceled", "expired"]);
-const uploadContentTypeSchema = z.enum([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "video/mp4",
-  "video/webm",
-  "audio/mpeg",
-  "audio/wav",
-]);
+const uploadContentTypeSchema = z.enum(UPLOAD_CONTENT_TYPES);
 const documentationEntrySchema = z
   .object({
     slug: z.string(),
@@ -88,7 +81,15 @@ const serviceStatusSchema = z
 const modelPriceSchema = z
   .object({
     variant: z.string(),
-    unit: z.enum(["per_image", "per_second", "per_request", "per_1k_tokens"]),
+    // An open string for the same reason as policyTier below. It was a four-value z.enum until the
+    // service started billing speech models per thousand characters; from then on every listing
+    // that contained one of them failed with "Output validation error" rather than returning models.
+    unit: z
+      .string()
+      .describe(
+        "Known values: per_image, per_second, per_request, per_1k_tokens, per_1k_characters. " +
+          "Treat the set as open and ignore a value you do not recognise.",
+      ),
     price: usdStringSchema,
     currency: z.literal("USD"),
   })
@@ -158,6 +159,12 @@ const taskListSchema = z.object({
       createdAt: z.string(),
       deadlineAt: z.string(),
       completedAt: z.string().optional(),
+      requestId: z
+        .string()
+        .optional()
+        .describe(
+          "X-Request-Id of the request that created the task; matches a synchronous text call to its charge.",
+        ),
     }),
   ),
   hasMore: z.boolean(),
@@ -236,7 +243,10 @@ const uploadedFileSchema = z
     fileId: z.string(),
     status: z.literal("ready"),
     bytes: z.number().int().positive(),
-    contentType: uploadContentTypeSchema,
+    // Open on the way out, unlike the input enum: by the time this is validated the file has
+    // already been uploaded, and a type the service learned after this release must not turn that
+    // success into an "Output validation error" that hides the URI.
+    contentType: z.string(),
     durationSeconds: z.string().optional(),
     width: z.number().int().positive().optional(),
     height: z.number().int().positive().optional(),
@@ -256,6 +266,13 @@ const confirmedCreateTaskResultSchema = createTaskResultSchema.extend({
   idempotencyKey: z.string(),
 });
 const confirmedRetryTaskResultSchema = retryTaskResultSchema.extend({ idempotencyKey: z.string() });
+
+/* Not every result is a file, and an agent reads the tool description rather than the README: one
+   that only knew about output.assets[].url reported finished transcriptions as having produced
+   nothing. The shapes come from the contract's TaskOutput, TaskTranscript and TaskOutputAsset.layer. */
+const TEXT_AND_LAYER_RESULTS =
+  "Some models answer in words instead of a file: speech-to-text and other text results arrive in output.text with no assets, and a transcription may add output.transcript with word timings and the detected language. " +
+  "Layer decomposition returns one image asset per layer; stack them by ascending output.assets[].layer.zIndex.";
 
 function resultOf<T extends z.ZodType>(result: T): z.ZodObject<{ result: T }> {
   return z.object({ result });
@@ -816,7 +833,8 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
       {
         title: "Get a SpicyAPI task",
         description:
-          "Read a task created by the current API key, including ready output.assets[].url links. Use those URLs directly without your API key; query again if assets are pending or URLs have expired. A verified complete v2 webhook already contains the result. Unknown and inaccessible IDs are both 404.",
+          "Read a task created by the current API key, including ready output.assets[].url links. Use those URLs directly without your API key; query again if assets are pending or URLs have expired. A verified complete v2 webhook already contains the result. Unknown and inaccessible IDs are both 404. " +
+          TEXT_AND_LAYER_RESULTS,
         inputSchema: z.object({ taskId: z.string().min(1) }),
         outputSchema: resultOf(taskRecordSchema),
         annotations: {
@@ -835,7 +853,8 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
       {
         title: "Wait briefly for a SpicyAPI task",
         description:
-          "Wait for a task for up to 300 seconds and read ready output.assets[].url directly without a download-ticket call. By default, polling backs off from about 2 to at most 10 seconds; an explicit intervalSeconds stays fixed. Prefer signed webhooks for production; a complete verified v2 callback needs no extra task_get. A local wait timeout does not cancel the task.",
+          "Wait for a task for up to 300 seconds and read ready output.assets[].url directly without a download-ticket call. By default, polling backs off from about 2 to at most 10 seconds; an explicit intervalSeconds stays fixed. Prefer signed webhooks for production; a complete verified v2 callback needs no extra task_get. A local wait timeout does not cancel the task. " +
+          TEXT_AND_LAYER_RESULTS,
         inputSchema: z.object({
           taskId: z.string().min(1),
           intervalSeconds: z
@@ -891,7 +910,7 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
       {
         title: "Upload a local file to SpicyAPI",
         description:
-          "Read a file from this computer, upload it, and return the spicy:// URI to put in a model input field. Use this whenever the user refers to a file on their machine. Images up to 10 MiB; MP4/WebM video and MP3/WAV audio up to 90 MiB. Public HTTPS media URLs need no upload at all — pass them straight to the model input when its schema accepts a URL.",
+          "Read a file from this computer, upload it, and return the spicy:// URI to put in a model input field. Use this whenever the user refers to a file on their machine. Images (JPEG, PNG, WebP, GIF) up to 10 MiB; MP4/WebM video and MP3/WAV audio up to 90 MiB; reference documents (PDF, Word, Excel, PowerPoint, Keynote, Pages, Numbers, TXT, Markdown) up to 90 MiB for fields such as reference_file_url. Public HTTPS media URLs need no upload at all — pass them straight to the model input when its schema accepts a URL.",
         inputSchema: z.object({
           path: z
             .string()
@@ -913,7 +932,10 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
         safely(async () => {
           const resolved = await resolveUploadPath(path);
           return client.uploadFile(resolved, {
-            ...(contentType === undefined ? {} : { contentType }),
+            /* Named on this side rather than left to the SDK, whose extension table and types stop
+               at the eight media types; documents pass through it unchanged at runtime and are
+               checked by the server. See upload-types.ts. */
+            contentType: (contentType ?? inferUploadContentType(resolved)) as UploadContentType,
             signal: ctx.mcpReq.signal,
           });
         }),

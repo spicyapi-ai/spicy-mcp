@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "spicyapi-mcp",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "description": "Official local MCP server for SpicyAPI: browse the live model catalog, get exact USD quotes, create image, video, audio and text tasks, and collect the results.",
   "author": {
     "name": "SpicyAPI",
