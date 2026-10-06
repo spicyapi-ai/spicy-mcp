@@ -5,6 +5,11 @@ already use — Claude Desktop, Claude Code, Codex, Cursor, VS Code, Windsurf, G
 client — browse the live model catalog, compare prices, create generation tasks and collect results,
 with every billable step confirmed by you.
 
+SpicyAPI is an unrestricted AI API: one key for 200+ image, video, audio and chat models (Seedance,
+Kling, Wan, MiniMax, Seedream, GPT Image, Suno and more), with no content filter added by the
+platform. What a request can produce depends on the model you pick, and the catalog marks which
+models are uncensored.
+
 This package installs `spicyapi-mcp` (stdio) and `spicyapi-mcp-http` (loopback-only Streamable
 HTTP). It does **not** contain the CLI or the Agent Skill.
 
