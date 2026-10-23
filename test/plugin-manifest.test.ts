@@ -19,7 +19,7 @@ const packageJson = readJson("package.json");
 const pluginJson = readJson("plugin.json");
 const mcpJson = readJson("mcp.json");
 
-test("the fixtures this file asserts against are actually loaded", () => {
+void test("the fixtures this file asserts against are actually loaded", () => {
   // Counter-evidence: without this, a lookup that silently returned undefined on both sides would
   // make every comparison below pass.
   assert.equal(packageJson["name"], "@spicyapi/mcp");
@@ -27,16 +27,16 @@ test("the fixtures this file asserts against are actually loaded", () => {
   assert.ok(Object.keys(packageJson["bin"] as Record<string, string>).length > 0);
 });
 
-test("plugin.json declares the published version", () => {
+void test("plugin.json declares the published version", () => {
   assert.equal(pluginJson["version"], packageJson["version"]);
 });
 
-test("plugin.json targets the Agent Plugins 1.0.0 manifest schema", () => {
+void test("plugin.json targets the Agent Plugins 1.0.0 manifest schema", () => {
   assert.equal(pluginJson["$schema"], "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
   assert.match(pluginJson["name"] as string, /^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/);
 });
 
-test("mcp.json launches the binary this package actually ships", () => {
+void test("mcp.json launches the binary this package actually ships", () => {
   assert.equal(mcpJson["$schema"], "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
 
   const servers = mcpJson["mcpServers"] as Record<string, Record<string, unknown>>;

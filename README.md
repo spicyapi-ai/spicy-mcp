@@ -182,7 +182,7 @@ Ask your assistant, in order:
 1. _"Check the SpicyAPI service status."_ — `spicyapi_service_status` needs no key, so this proves
    the server starts.
 2. _"What is my SpicyAPI balance?"_ — `spicyapi_balance_get` proves the key reaches the server.
-3. _"Which SpicyAPI tools do you have?"_ — expect 15 tools prefixed `spicyapi_`.
+3. _"Which SpicyAPI tools do you have?"_ — expect 22 tools prefixed `spicyapi_`.
 
 None of these costs anything.
 
@@ -204,6 +204,8 @@ More prompts to try:
   a confirmed task.
 - _"Show my SpicyAPI tasks from the last three days that failed, and why."_ — task history, free; a
   retry afterwards asks for confirmation.
+- _"Save the result of my last task to my SpicyAPI asset library as 'Hero portrait', then use it as
+  the starting image for a 5-second video."_ — a saved asset, then a confirmed task.
 
 Model IDs always come from the live catalog. Any placeholder such as `MODEL_ID_FROM_CATALOG` in
 SpicyAPI documentation means an exact ID selected from that catalog, not a literal value.
@@ -227,6 +229,13 @@ SpicyAPI documentation means an exact ID selected from that catalog, not a liter
 | `spicyapi_task_create`         | Create an asynchronous generation task                          | No        | **Yes**  | **Always**   |
 | `spicyapi_task_retry`          | Create a new task from a failed or expired one                  | No        | **Yes**  | **Always**   |
 | `spicyapi_task_purge`          | Destroy one terminal task's stored content (`destructiveHint`)  | No        | No       | **Always**   |
+| `spicyapi_assets_list`         | One page of saved assets, each with its `spicy://a/` reference  | Yes       | No       | No           |
+| `spicyapi_assets_usage_get`    | Asset storage plan, what is stored, today's count, next plan    | Yes       | No       | No           |
+| `spicyapi_asset_save`          | Save a task output, local file, URL or upload to the library    | No        | No       | No           |
+| `spicyapi_asset_rename`        | Rename a saved asset; its reference stays the same              | No        | No       | No           |
+| `spicyapi_asset_delete`        | Delete a saved asset for good (`destructiveHint`)               | No        | No       | **Always**   |
+| `spicyapi_characters_list`     | One page of characters, each with its images in order           | Yes       | No       | No           |
+| `spicyapi_character_get`       | One character with its images, as `spicy://a/` references       | Yes       | No       | No           |
 
 The server also registers two resources — `spicyapi://docs/index` and `spicyapi://contract/openapi`
 — and one prompt. `spicyapi_generation_workflow` is a **prompt**, not a tool — it is registered with
@@ -235,23 +244,30 @@ Hosts surface it wherever they list MCP prompts.
 
 ### Parameters
 
-| Tool                           | Parameters (required in **bold**)                                                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `spicyapi_service_status`      | none                                                                                                                                       |
-| `spicyapi_docs_search`         | `query` (default `""`), `limit` (1–25, default 10)                                                                                         |
-| `spicyapi_models_list`         | `modality` (`image` / `video` / `audio` / `text`), `provider`, `task`, `search`, `includeSchema`, `includeExamples` (both default `false`) |
-| `spicyapi_model_get`           | **`model`**                                                                                                                                |
-| `spicyapi_balance_get`         | none                                                                                                                                       |
-| `spicyapi_usage_get`           | `from`, `to` (`YYYY-MM-DD`, UTC)                                                                                                           |
-| `spicyapi_tasks_list`          | `from`, `to`, `state`, `model`, `limit` (1–100, default 20), `cursor`                                                                      |
-| `spicyapi_task_get`            | **`taskId`**                                                                                                                               |
-| `spicyapi_task_wait`           | **`taskId`**, `timeoutSeconds` (1–300, default 60), `intervalSeconds` (1–60, default adaptive)                                             |
-| `spicyapi_upload_file`         | **`path`** (absolute; `~/`, and `~\` on Windows, is expanded), `contentType` (only when the extension is missing or wrong)                 |
-| `spicyapi_download_url_create` | **`taskId`**, `key`                                                                                                                        |
-| `spicyapi_task_quote`          | **`model`**, **`input`**, `callBackUrl`                                                                                                    |
-| `spicyapi_task_create`         | **`model`**, **`input`**, `callBackUrl`, `idempotencyKey`, `retentionSeconds`                                                              |
-| `spicyapi_task_retry`          | **`taskId`**, `idempotencyKey`                                                                                                             |
-| `spicyapi_task_purge`          | **`taskId`**                                                                                                                               |
+| Tool                           | Parameters (required in **bold**)                                                                                                                                                                                                  |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spicyapi_service_status`      | none                                                                                                                                                                                                                               |
+| `spicyapi_docs_search`         | `query` (default `""`), `limit` (1–25, default 10)                                                                                                                                                                                 |
+| `spicyapi_models_list`         | `modality` (`image` / `video` / `audio` / `text`), `provider`, `task`, `search`, `includeSchema`, `includeExamples` (both default `false`)                                                                                         |
+| `spicyapi_model_get`           | **`model`**                                                                                                                                                                                                                        |
+| `spicyapi_balance_get`         | none                                                                                                                                                                                                                               |
+| `spicyapi_usage_get`           | `from`, `to` (`YYYY-MM-DD`, UTC)                                                                                                                                                                                                   |
+| `spicyapi_tasks_list`          | `from`, `to`, `state`, `model`, `limit` (1–100, default 20), `cursor`                                                                                                                                                              |
+| `spicyapi_task_get`            | **`taskId`**                                                                                                                                                                                                                       |
+| `spicyapi_task_wait`           | **`taskId`**, `timeoutSeconds` (1–300, default 60), `intervalSeconds` (1–60, default adaptive)                                                                                                                                     |
+| `spicyapi_upload_file`         | **`path`** (absolute; `~/`, and `~\` on Windows, is expanded), `contentType` (only when the extension is missing or wrong)                                                                                                         |
+| `spicyapi_download_url_create` | **`taskId`**, `key`                                                                                                                                                                                                                |
+| `spicyapi_task_quote`          | **`model`**, **`input`**, `callBackUrl`                                                                                                                                                                                            |
+| `spicyapi_task_create`         | **`model`**, **`input`**, `callBackUrl`, `idempotencyKey`, `retentionSeconds`                                                                                                                                                      |
+| `spicyapi_task_retry`          | **`taskId`**, `idempotencyKey`                                                                                                                                                                                                     |
+| `spicyapi_task_purge`          | **`taskId`**                                                                                                                                                                                                                       |
+| `spicyapi_assets_list`         | `kind` (`image` / `video` / `audio`), `source` (array of `task_output` / `upload` / `url`), `query`, `favorite`, `collectionId`, `entityId`, `sort` (`recent` / `oldest` / `name` / `size`), `cursor`, `limit` (1–100, default 20) |
+| `spicyapi_assets_usage_get`    | none                                                                                                                                                                                                                               |
+| `spicyapi_asset_save`          | exactly one of `taskId` (with `index` or `key`), `path` (with `contentType`), `url`, `fileId`; `name`, `idempotencyKey`                                                                                                            |
+| `spicyapi_asset_rename`        | **`assetId`** (`ast_…` or `spicy://a/…`), **`name`** (1–80 characters)                                                                                                                                                             |
+| `spicyapi_asset_delete`        | **`assetId`**                                                                                                                                                                                                                      |
+| `spicyapi_characters_list`     | `assetId` (only characters that contain it), `cursor`, `limit` (1–100, default 20)                                                                                                                                                 |
+| `spicyapi_character_get`       | **`characterId`**                                                                                                                                                                                                                  |
 
 Model input schemas are returned as plain JSON Schema: display-only and rate-card annotations are
 stripped before they reach the agent.
@@ -363,12 +379,13 @@ a model input field. There is no separate commit tool: nothing on the MCP side e
 half-finished upload. Split-step uploads (ticket, `PUT`, commit) belong to SDK code, which finishes
 them with `commitUploadedFile`. Images (JPEG, PNG, WebP, GIF) up to 10 MiB; MP4 / WebM video and MP3
 / WAV audio up to 90 MiB; reference documents up to 90 MiB — PDF, Word, Excel, PowerPoint, Keynote,
-Pages, Numbers, plain text and Markdown — for fields such as `reference_file_url`. Content type is
-inferred from the extension. Public HTTPS media URLs need no upload. Relative paths are refused; a
-leading `~/` (and `~\` on Windows) is expanded to the home directory. If the extension is not
-recognised, nothing is uploaded and the error lists every extension the tool infers: `gif`, `jpeg`,
-`jpg`, `png`, `webp`, `mp4`, `webm`, `mp3`, `wav`, `pdf`, `doc`, `docx`, `xls`, `xlsx`, `ppt`,
-`pptx`, `key`, `pages`, `numbers`, `txt`, `md`, `markdown`.
+Pages, Numbers, plain text and Markdown — for fields such as `reference_file_url`; LoRA weights
+(`.safetensors`, up to 2 GiB) for `loras[].path`. Content type is inferred from the extension.
+Public HTTPS media URLs need no upload. Relative paths are refused; a leading `~/` (and `~\` on
+Windows) is expanded to the home directory. If the extension is not recognised, nothing is uploaded
+and the error lists every extension the tool infers: `gif`, `jpeg`, `jpg`, `png`, `webp`, `mp4`,
+`webm`, `mp3`, `wav`, `pdf`, `doc`, `docx`, `xls`, `xlsx`, `ppt`, `pptx`, `key`, `pages`, `numbers`,
+`txt`, `md`, `markdown`, `safetensors`.
 
 The server reads only under the user's home directory. Symlinks are resolved before the check, so a
 link pointing out of an allowed root is refused. The guard exists for prompt injection — a path that
@@ -392,16 +409,54 @@ On Windows the same entry reads `"SPICY_MCP_UPLOAD_ROOTS": "C:\\Users\\you\\Pict
 (backslashes doubled inside JSON). A root that does not exist matches nothing; the refusal message
 lists the roots in effect.
 
+## Asset library
+
+An upload's `spicy://` URI lasts one day. Files the user wants to reuse — a character portrait, a
+style reference, a voice sample — can be saved to the asset library with `spicyapi_asset_save`; each
+saved file gets a `uri` of the form `spicy://a/<id>` that works in any media field of model inputs
+sent with keys of the same workspace, until it is deleted. The agent puts that `uri` straight into
+the task input, with no upload or download step.
+
+The configured `SPICY_API_KEY` decides the library: a personal key reaches the user's personal
+library, a team key that team's shared library. With a team key, the creator's current role decides
+what may change (owner and admin anything; developer saves and renames, favorites or deletes only
+what they saved; billing and readonly only read and use); `spicyapi_assets_usage_get` returns this
+as `scope`.
+
+- `spicyapi_asset_save` takes exactly one source: `taskId` (with `index` or `key`; the first output
+  by default), `path` (an absolute local path, read under the same `SPICY_MCP_UPLOAD_ROOTS` guard as
+  `spicyapi_upload_file`), `url`, or `fileId`. The required `Idempotency-Key` is added for you.
+- `spicyapi_assets_list` filters by `kind`, `source`, a name `query`, `favorite`, a folder
+  (`collectionId`) and one character's images (`entityId`), and orders by `sort` (`recent` by
+  default, `oldest`, `name`, `size`), 20 per page by default; follow `nextCursor` with the same
+  `sort` (a cursor from another sort gets `400`). Folders and favorites are managed on the Assets
+  page of the web app. Each item's `previewUrl` is a private preview signed for at most 20 minutes —
+  fine to show, never to store.
+- `spicyapi_characters_list` and `spicyapi_character_get` read characters: named, ordered sets of
+  images created on the web. To use one, the agent puts its images' `uri` values, in order, into the
+  model's reference image field. Older `spicy://p/<id>` persona references still resolve to the same
+  images, in the personal library only. An unknown character is a `404`.
+- `spicyapi_asset_delete` asks for confirmation every time, because the reference stops working at
+  once and there is no undo.
+- Storage unlocks with the owner's lifetime top-ups, shared by their personal and team libraries. A
+  refused call returns the server's `reason` (for example `asset_library_full`, `asset_daily_limit`
+  or `asset_permission_denied`) in the error JSON; `spicyapi_assets_usage_get` explains the plan and
+  what the next one takes, and leaves out the top-up amounts when `scope.canTopUp` is false.
+
+See the asset library guide:
+[favorites and folders](https://docs.spicyapi.ai/docs/media#asset-library-organize) and
+[characters](https://docs.spicyapi.ai/docs/media#asset-library-characters).
+
 ## Environment variables
 
-| Variable                 | Used by             | Meaning                                                                                                 |
-| ------------------------ | ------------------- | ------------------------------------------------------------------------------------------------------- |
-| `SPICY_API_KEY`          | both entrypoints    | Your API key. Required for everything except status and docs search                                     |
-| `SPICY_MCP_UPLOAD_ROOTS` | both entrypoints    | Directories `spicyapi_upload_file` may read, separated by `:` (`;` on Windows). Default: home directory |
-| `SPICY_MCP_HTTP_TOKEN`   | `spicyapi-mcp-http` | Required bearer token, at least 32 bytes, different from `SPICY_API_KEY`                                |
-| `SPICY_MCP_HOST`         | `spicyapi-mcp-http` | `127.0.0.1` (default), `localhost` or `::1`; anything else is refused                                   |
-| `SPICY_MCP_PORT`         | `spicyapi-mcp-http` | Port, default `8765`                                                                                    |
-| `HTTPS_PROXY`            | both entrypoints    | Send API calls through this proxy; see [Behind a proxy](#behind-a-proxy)                                |
+| Variable                 | Used by             | Meaning                                                                                                                           |
+| ------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `SPICY_API_KEY`          | both entrypoints    | Your API key. Required for everything except status and docs search                                                               |
+| `SPICY_MCP_UPLOAD_ROOTS` | both entrypoints    | Directories `spicyapi_upload_file` and `spicyapi_asset_save` may read, separated by `:` (`;` on Windows). Default: home directory |
+| `SPICY_MCP_HTTP_TOKEN`   | `spicyapi-mcp-http` | Required bearer token, at least 32 bytes, different from `SPICY_API_KEY`                                                          |
+| `SPICY_MCP_HOST`         | `spicyapi-mcp-http` | `127.0.0.1` (default), `localhost` or `::1`; anything else is refused                                                             |
+| `SPICY_MCP_PORT`         | `spicyapi-mcp-http` | Port, default `8765`                                                                                                              |
+| `HTTPS_PROXY`            | both entrypoints    | Send API calls through this proxy; see [Behind a proxy](#behind-a-proxy)                                                          |
 
 ## Behind a proxy
 
@@ -422,8 +477,8 @@ codex mcp add spicyapi \
 ```
 
 A proxy that `curl` in your terminal uses and this server does not is the usual reason `curl`
-reaches the API while the server reports `network request failed`. Errors then say so: they name
-the proxy variable that was set and not used. `socks5://` proxies are not supported.
+reaches the API while the server reports `network request failed`. Errors then say so: they name the
+proxy variable that was set and not used. `socks5://` proxies are not supported.
 
 ## HTTP entrypoint
 

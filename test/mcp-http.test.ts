@@ -97,7 +97,7 @@ void test("loopback MCP HTTP enforces auth and completes a modern handshake", as
     });
     await client.connect(transport);
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 15);
+    assert.equal(tools.tools.length, 22);
     assert.ok(tools.tools.some((tool) => tool.name === "spicyapi_usage_get"));
     assert.ok(tools.tools.some((tool) => tool.name === "spicyapi_tasks_list"));
     assert.ok(tools.tools.some((tool) => tool.name === "spicyapi_task_create"));

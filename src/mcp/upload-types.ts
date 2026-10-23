@@ -4,12 +4,11 @@ import path from "node:path";
    Like upload-paths.ts, this is an implementation detail of that tool and is not exported from the
    package entry point.
 
-   The list must cover the contract's `UploadURLRequest.contentType` enum value for value, and lives
-   here rather than in the SDK on purpose: the published SDK's `UploadContentType` and its extension
-   table still stop at eight media types, while the service has accepted reference documents (for
-   fields such as `reference_file_url`) since 2026-09-29. The SDK forwards whatever content type it
-   is given at runtime, so naming the type on this side is enough; once the SDK lists documents too,
-   the two simply overlap. */
+   The list must cover the contract's `UploadURLRequest.contentType` enum value for value (a test
+   compares them). It was first kept here because the SDK's `UploadContentType` stopped at eight
+   media types when the service began accepting reference documents on 2026-09-29; the SDK has
+   listed them since 0.8.0, so the two now overlap, and this table still decides what the tool's
+   error message names. */
 
 export const UPLOAD_CONTENT_TYPES = [
   "image/jpeg",
@@ -32,6 +31,7 @@ export const UPLOAD_CONTENT_TYPES = [
   "application/vnd.apple.numbers",
   "text/plain",
   "text/markdown",
+  "application/octet-stream",
 ] as const;
 
 export type McpUploadContentType = (typeof UPLOAD_CONTENT_TYPES)[number];
@@ -58,6 +58,8 @@ const CONTENT_TYPES_BY_EXTENSION: Readonly<Record<string, McpUploadContentType>>
   ".numbers": "application/vnd.apple.numbers",
   ".txt": "text/plain",
   ".md": "text/markdown",
+  // LoRA weights for `loras[].path`: a .safetensors file of up to 2 GiB.
+  ".safetensors": "application/octet-stream",
   ".markdown": "text/markdown",
 };
 
@@ -70,8 +72,7 @@ export const UPLOAD_EXTENSIONS: readonly string[] = Object.keys(CONTENT_TYPES_BY
  * The content type for a file, taken from its extension (case-insensitive).
  *
  * The error names every extension in the table, so it can never list fewer types than the tool
- * accepts - the SDK's own message would mention only its eight media types and leave the model
- * believing documents cannot be uploaded at all.
+ * accepts, and the model never comes away believing a supported type cannot be uploaded.
  */
 export function inferUploadContentType(filePath: string): McpUploadContentType {
   const contentType = CONTENT_TYPES_BY_EXTENSION[path.extname(filePath).toLowerCase()];

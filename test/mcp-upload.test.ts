@@ -162,9 +162,15 @@ void test("a local file goes through the whole chain, returning a spicy:// URI a
     const text = JSON.stringify(result);
     assert.match(text, /spicy:\/\/file_1/);
     assert.equal(seen.put, "PUT", "the bytes must genuinely be PUT");
-    assert.ok(!text.includes("r2.cloudflarestorage.com"), "an object-storage URL appeared in the return value");
+    assert.ok(
+      !text.includes("r2.cloudflarestorage.com"),
+      "an object-storage URL appeared in the return value",
+    );
     assert.ok(!text.includes("X-Amz-Signature"), "a signature appeared in the return value");
-    assert.ok(!text.includes("spicy-production-inputs"), "a bucket name appeared in the return value");
+    assert.ok(
+      !text.includes("spicy-production-inputs"),
+      "a bucket name appeared in the return value",
+    );
   } finally {
     await connection.close();
     delete process.env.SPICY_MCP_UPLOAD_ROOTS;
@@ -212,7 +218,8 @@ function echoingStub(seen: { declared?: string; put?: boolean; tickets: number }
     const url = String(input instanceof Request ? input.url : input);
     if (url.includes("/common/upload-url")) {
       seen.tickets += 1;
-      seen.declared = (JSON.parse(String(init?.body)) as { contentType: string }).contentType;
+      const body = typeof init?.body === "string" ? init.body : "{}";
+      seen.declared = (JSON.parse(body) as { contentType: string }).contentType;
       return Promise.resolve(
         Response.json({
           code: 200,
@@ -280,8 +287,9 @@ void test("reference documents upload with their type named on this side, becaus
       assert.equal(result.isError, undefined, `${name}: ${JSON.stringify(result.content)}`);
       assert.equal(seen.declared, expected, `${name} was declared with the wrong type`);
       assert.equal(seen.put, true, `${name}: the bytes must genuinely be PUT`);
-      const uploaded = (result.structuredContent as { result?: { uri?: string; contentType?: string } })
-        .result;
+      const uploaded = (
+        result.structuredContent as { result?: { uri?: string; contentType?: string } }
+      ).result;
       assert.equal(uploaded?.uri, "spicy://f/fil_doc");
       assert.equal(uploaded?.contentType, expected);
     } finally {

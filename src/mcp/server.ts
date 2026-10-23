@@ -23,7 +23,6 @@ import {
   SpicyApiError,
   SpicyClient,
   type SpicyClientOptions,
-  type UploadContentType,
 } from "@spicyapi/sdk";
 
 import { expandHomePath, splitUploadRoots } from "./upload-paths.js";
@@ -289,8 +288,131 @@ const taskQuoteSchema = z.object({
   expiresAt: z.string(),
 });
 
+/* The asset shapes below use open strings for kind and source on purpose: an output schema that
+   pins an enum makes the MCP SDK reject the whole result the day the server adds a value, and a
+   descriptive field is not worth failing a listing over (see policyTier above). */
+const assetSchema = z
+  .object({
+    id: z.string(),
+    uri: z
+      .string()
+      .describe(
+        "Stable spicy://a/<id> reference. Put it in any media field of a model input; it works until the asset is deleted and only in requests made with keys of the same workspace.",
+      ),
+    name: z.string(),
+    kind: z.string().describe("Known values: image, video, audio."),
+    contentType: z.string(),
+    bytes: z.number().int().nonnegative(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    durationSeconds: z.number().positive().optional(),
+    source: z.string().describe("Known values: task_output, upload, url."),
+    sourceId: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    previewUrl: z
+      .string()
+      .describe(
+        "Private preview signed for at most 20 minutes; empty when signing failed. Never store or share it; keep uri instead.",
+      ),
+    previewUrlExpiresAt: z.string().optional(),
+    // Optional although the contract requires them: a server from before favorites and model names
+    // omits them, and a missing descriptive field should not fail a listing.
+    favorite: z
+      .boolean()
+      .optional()
+      .describe("Favorite mark of the library; in a team library everyone sees the same ones."),
+    model: z
+      .string()
+      .optional()
+      .describe("Public name of the model that generated the asset; empty for uploads and links."),
+    modelName: z.string().optional().describe("Display name of that model; may be empty."),
+  })
+  .passthrough();
+/* A character is a named, ordered set of images in the library; the images are ordinary assets. */
+const characterSchema = z
+  .object({
+    id: z.string(),
+    kind: z.string().describe("Known values: character."),
+    name: z.string(),
+    note: z.string(),
+    coverAssetId: z.string().describe("Empty while the character has no images."),
+    cover: assetSchema.nullable().describe("The cover image, or null while there are no images."),
+    assets: z
+      .array(assetSchema)
+      .describe(
+        "The character's images in order. Put their uri values, in this order, into the model's reference image field.",
+      ),
+    count: z.number().int().nonnegative(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .passthrough();
+const characterListSchema = z
+  .object({
+    items: z.array(characterSchema),
+    nextCursor: z.string().optional().describe("Absent on the last page."),
+  })
+  .passthrough();
+const assetListSchema = z
+  .object({
+    items: z.array(assetSchema),
+    nextCursor: z.string().optional().describe("Absent on the last page."),
+  })
+  .passthrough();
+const assetPlanSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    minTopupUsd: z.string(),
+    maxBytes: z.number().int().nonnegative(),
+    maxCount: z.number().int().nonnegative(),
+    maxFileBytes: z.number().int().nonnegative(),
+  })
+  .passthrough();
+const assetUsageSchema = z
+  .object({
+    tier: assetPlanSchema,
+    usage: z
+      .object({ count: z.number().int().nonnegative(), bytes: z.number().int().nonnegative() })
+      .passthrough(),
+    limits: z.record(z.string(), z.unknown()),
+    full: z
+      .boolean()
+      .describe("True when nothing new fits, including plans where saving is closed."),
+    nextTier: assetPlanSchema.nullable(),
+    topupToNextTierUsd: z.string().optional().describe("Absent when scope.canTopUp is false."),
+    lifetimeTopupUsd: z.string().optional().describe("Absent when scope.canTopUp is false."),
+    tiers: z.array(assetPlanSchema),
+    dailyCreateLimit: z.number().int().nonnegative(),
+    createdToday: z.number().int().nonnegative(),
+    scope: z
+      .object({
+        workspaceId: z.string(),
+        personal: z.boolean(),
+        role: z
+          .string()
+          .describe(
+            "Known values: owner, admin, developer, billing, readonly. For a team key, the current role of the member who created it.",
+          ),
+        canWrite: z.boolean().describe("Whether new assets can be saved in this library."),
+        canTopUp: z
+          .boolean()
+          .describe(
+            "Whether the caller can see and raise the owner's allowance. When false, lifetimeTopupUsd and topupToNextTierUsd are absent: tell the user the team owner upgrades the plan.",
+          ),
+      })
+      .passthrough()
+      // Optional here although the contract requires it: a server that predates team libraries
+      // omits it, and missing metadata should not fail the whole usage call.
+      .optional()
+      .describe("Which library the key reaches and what it may do there."),
+  })
+  .passthrough();
+const assetDeletedSchema = z.object({ id: z.string(), deleted: z.literal(true) }).passthrough();
+
 const billableStateSchema = z.object({
-  action: z.enum(["create_task", "retry_task", "purge_task"]),
+  action: z.enum(["create_task", "retry_task", "purge_task", "delete_asset"]),
   fingerprint: z.string(),
   quote: taskQuoteSchema.optional(),
   idempotencyKey: z.string(),
@@ -313,6 +435,13 @@ export const SPICYAPI_MCP_TOOLS = [
   "spicyapi_task_create",
   "spicyapi_task_retry",
   "spicyapi_task_purge",
+  "spicyapi_assets_list",
+  "spicyapi_asset_save",
+  "spicyapi_asset_rename",
+  "spicyapi_asset_delete",
+  "spicyapi_assets_usage_get",
+  "spicyapi_characters_list",
+  "spicyapi_character_get",
 ] as const;
 
 export interface SpicyMcpFactoryOptions {
@@ -369,6 +498,7 @@ function toolError(error: unknown): CallToolResult {
       type: error.name,
       status: error.status,
       ...(error.code === undefined ? {} : { code: error.code }),
+      ...(error.reason === undefined ? {} : { reason: error.reason }),
       ...(error.requestId === undefined ? {} : { requestId: error.requestId }),
       ...(error.retryAfterSeconds === undefined
         ? {}
@@ -500,6 +630,8 @@ function declinedMessage(action: BillableState["action"]): string {
       return "operation declined; no retry task was created and no SpicyAPI request was made";
     case "purge_task":
       return "operation declined; nothing was destroyed and no SpicyAPI request was made";
+    case "delete_asset":
+      return "operation declined; the asset was not deleted and no SpicyAPI request was made";
   }
 }
 
@@ -532,7 +664,7 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
       { name: SERVER_NAME, version: SERVER_VERSION },
       {
         instructions:
-          "Use the live model catalog as the only source of model IDs and input schemas; reuse a complete model record already obtained in this workflow. Task creation quotes internally and requires user confirmation; do not call the separate quote tool first unless comparing prices. Retry also requires confirmation. Read ready output.assets[].url directly without a download-ticket call. Health and balance tools are optional diagnostics. Never invent cancellation APIs; they are not part of the public contract. Content destruction does exist: spicyapi_task_purge removes a terminal task's generated media, result payload, prompt and other input text while leaving the billing record intact, and it is irreversible, so call it only when the user asked for that specific task. When the user refers to a file on their own computer, call spicyapi_upload_file with the absolute path and put the returned spicy:// URI in the model input; ask the user for the full path rather than guessing a folder.",
+          "Use the live model catalog as the only source of model IDs and input schemas; reuse a complete model record already obtained in this workflow. Task creation quotes internally and requires user confirmation; do not call the separate quote tool first unless comparing prices. Retry also requires confirmation. Read ready output.assets[].url directly without a download-ticket call. Health and balance tools are optional diagnostics. Never invent cancellation APIs; they are not part of the public contract. Content destruction does exist: spicyapi_task_purge removes a terminal task's generated media, result payload, prompt and other input text while leaving the billing record intact, and it is irreversible, so call it only when the user asked for that specific task. When the user refers to a file on their own computer, call spicyapi_upload_file with the absolute path and put the returned spicy:// URI in the model input; ask the user for the full path rather than guessing a folder. To keep a file for later generations, save it with spicyapi_asset_save and use the returned spicy://a/<id> uri in any media field; saved assets stay until deleted, while spicy://f/ uploads expire after a day. When the user mentions a file they saved before, find it with spicyapi_assets_list.",
         cacheHints: {
           "tools/list": { ttlMs: 60_000, cacheScope: "private" },
           "resources/list": { ttlMs: 300_000, cacheScope: "public" },
@@ -621,7 +753,9 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
       const assurance =
         action === "purge_task"
           ? " This is not reversible and there is no undo. Your billing records are kept: the charge, model, state, timestamps and request ID stay queryable afterwards."
-          : ` Before accepting the request, SpicyAPI checks the model’s current input requirements, price and availability, your API key permissions, and available funds. Idempotency-Key: ${idempotencyKey}`;
+          : action === "delete_asset"
+            ? " This is not reversible and there is no undo: the stored file is removed and its spicy://a/ reference stops working in new requests."
+            : ` Before accepting the request, SpicyAPI checks the model’s current input requirements, price and availability, your API key permissions, and available funds. Idempotency-Key: ${idempotencyKey}`;
       return inputRequired({
         inputRequests: {
           [CONFIRMATION_KEY]: inputRequired.elicit({
@@ -932,10 +1066,9 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
         safely(async () => {
           const resolved = await resolveUploadPath(path);
           return client.uploadFile(resolved, {
-            /* Named on this side rather than left to the SDK, whose extension table and types stop
-               at the eight media types; documents pass through it unchanged at runtime and are
-               checked by the server. See upload-types.ts. */
-            contentType: (contentType ?? inferUploadContentType(resolved)) as UploadContentType,
+            /* Named on this side rather than left to the SDK so the error for an unknown extension
+               lists every type this tool accepts. See upload-types.ts. */
+            contentType: contentType ?? inferUploadContentType(resolved),
             signal: ctx.mcpReq.signal,
           });
         }),
@@ -1129,6 +1262,334 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
         ),
     );
 
+    const assetIdSchema = z
+      .string()
+      .min(1)
+      .describe("The asset id (ast_…) or its spicy://a/<id> reference; both are accepted.");
+
+    server.registerTool(
+      "spicyapi_assets_list",
+      {
+        title: "List saved SpicyAPI assets",
+        description:
+          "List files in the asset library this key reaches — the personal library for a personal key, the team's shared library for a team key — newest first unless sort says otherwise, one page at a time; pass nextCursor back as cursor with the same filters and sort to continue (a cursor from another sort is rejected with 400). " +
+          "Narrow it with favorite, collectionId (a folder; folders are created on the web, and an id outside this library is a 404), entityId (the images of one character) and query. " +
+          "Each item's uri (spicy://a/<id>) goes straight into any media field of a model input — no upload or download step. " +
+          "previewUrl is a private preview signed for at most 20 minutes; use it to show the file, never store it. " +
+          "A change the key's team role does not allow gets 403 with reason asset_permission_denied; a key that cannot reach the library gets 403 with asset_workspace_forbidden.",
+        inputSchema: z
+          .object({
+            kind: z.enum(["image", "video", "audio"]).optional(),
+            source: z
+              .array(z.enum(["task_output", "upload", "url"]))
+              .min(1)
+              .optional()
+              .describe("Only assets saved from these sources."),
+            query: z
+              .string()
+              .max(80)
+              .optional()
+              .describe("Case-insensitive part of the asset name."),
+            favorite: z
+              .boolean()
+              .optional()
+              .describe("true lists only favorites, false only assets that are not favorites."),
+            collectionId: z
+              .string()
+              .min(1)
+              .max(40)
+              .optional()
+              .describe("Only the assets in this folder (a collection of the same library)."),
+            entityId: z
+              .string()
+              .min(1)
+              .max(40)
+              .optional()
+              .describe("Only the images of this character, from spicyapi_characters_list."),
+            sort: z
+              .enum(["recent", "oldest", "name", "size"])
+              .optional()
+              .describe(
+                "recent (default, newest first), oldest, name (A to Z) or size (largest first).",
+              ),
+            cursor: z.string().min(1).optional(),
+            limit: z.number().int().min(1).max(100).default(20),
+          })
+          .strict(),
+        outputSchema: resultOf(assetListSchema),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async ({ kind, source, query, favorite, collectionId, entityId, sort, cursor, limit }, ctx) =>
+        safely(() =>
+          client.assets.list({
+            ...(kind === undefined ? {} : { kind }),
+            ...(source === undefined ? {} : { source }),
+            ...(query === undefined ? {} : { q: query }),
+            ...(favorite === undefined ? {} : { favorite }),
+            ...(collectionId === undefined ? {} : { collectionId }),
+            ...(entityId === undefined ? {} : { entityId }),
+            ...(sort === undefined ? {} : { sort }),
+            ...(cursor === undefined ? {} : { cursor }),
+            limit,
+            signal: ctx.mcpReq.signal,
+          }),
+        ),
+    );
+
+    server.registerTool(
+      "spicyapi_asset_save",
+      {
+        title: "Save a file to the SpicyAPI asset library",
+        description:
+          "Keep a file in the asset library this key reaches (personal, or the team's shared library for a team key) until it is deleted, and return its spicy://a/<id> uri for later model inputs made with keys of the same workspace. " +
+          "Give exactly one source: taskId (an output of one of the user's own successful tasks, or of the team's with a team key; index or key picks which, the first output by default), " +
+          "path (an absolute path to a file on this computer, uploaded first), url (a public http or https file), or fileId (a committed spicy://f/ upload). " +
+          "Saving the same task output, upload or URL again returns the existing asset. Storage unlocks with lifetime top-ups; " +
+          "a refusal carries a reason (asset_library_locked, asset_library_full, asset_file_too_large, asset_daily_limit, asset_storage_full) — call spicyapi_assets_usage_get to explain the plan rather than retrying.",
+        inputSchema: z
+          .object({
+            taskId: z.string().min(1).optional(),
+            index: z
+              .number()
+              .int()
+              .min(0)
+              .optional()
+              .describe("With taskId: zero-based position in output.assets."),
+            key: z
+              .string()
+              .min(1)
+              .optional()
+              .describe("With taskId: the output key, instead of index."),
+            path: z
+              .string()
+              .min(1)
+              .optional()
+              .describe("Absolute path to a file on this computer, as the user gave it."),
+            contentType: uploadContentTypeSchema
+              .optional()
+              .describe("With path: only when the file extension is missing or wrong."),
+            url: z.string().min(1).optional(),
+            fileId: z
+              .string()
+              .min(1)
+              .optional()
+              .describe("A committed upload: fil_… or spicy://f/…"),
+            name: z
+              .string()
+              .min(1)
+              .max(80)
+              .optional()
+              .describe("Up to 80 characters; a path defaults to its file name."),
+            idempotencyKey: z
+              .string()
+              .min(1)
+              .optional()
+              .describe(
+                "Reuse the key from an uncertain earlier attempt to replay that save. Not used with path, which uploads again on every call.",
+              ),
+          })
+          .strict(),
+        outputSchema: resultOf(assetSchema),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
+      async (args, ctx) =>
+        safely(async () => {
+          const given = (["taskId", "path", "url", "fileId"] as const).filter(
+            (field) => args[field] !== undefined,
+          );
+          if (given.length !== 1) {
+            throw new SpicyApiError(
+              "give exactly one of taskId, path, url or fileId to say which file to save",
+              { status: 400 },
+            );
+          }
+          if (args.taskId === undefined && (args.index !== undefined || args.key !== undefined)) {
+            throw new SpicyApiError("index and key pick a task output, so they need taskId", {
+              status: 400,
+            });
+          }
+          if (args.index !== undefined && args.key !== undefined) {
+            throw new SpicyApiError("give index or key, not both", { status: 400 });
+          }
+          if (args.path === undefined && args.contentType !== undefined) {
+            throw new SpicyApiError("contentType only applies to path", { status: 400 });
+          }
+          const name = args.name === undefined ? {} : { name: args.name };
+          if (args.path !== undefined) {
+            const resolved = await resolveUploadPath(args.path);
+            return client.assets.uploadFile(resolved, {
+              ...name,
+              ...(args.contentType === undefined ? {} : { contentType: args.contentType }),
+              signal: ctx.mcpReq.signal,
+            });
+          }
+          const options = {
+            ...(args.idempotencyKey === undefined ? {} : { idempotencyKey: args.idempotencyKey }),
+            signal: ctx.mcpReq.signal,
+          };
+          if (args.taskId !== undefined) {
+            const output = args.key === undefined ? { index: args.index ?? 0 } : { key: args.key };
+            return client.assets.create(
+              { source: "task_output", taskId: args.taskId, ...output, ...name },
+              options,
+            );
+          }
+          if (args.url !== undefined) {
+            return client.assets.create({ source: "url", url: args.url, ...name }, options);
+          }
+          if (args.fileId !== undefined) {
+            return client.assets.create(
+              { source: "upload", fileId: args.fileId, ...name },
+              options,
+            );
+          }
+          throw new SpicyApiError("no source to save", { status: 400 });
+        }),
+    );
+
+    server.registerTool(
+      "spicyapi_asset_rename",
+      {
+        title: "Rename a saved SpicyAPI asset",
+        description:
+          "Change an asset's name. Its spicy://a/<id> uri stays the same, so model inputs that already use it keep working.",
+        inputSchema: z.object({ assetId: assetIdSchema, name: z.string().min(1).max(80) }).strict(),
+        outputSchema: resultOf(assetSchema),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async ({ assetId, name }, ctx) =>
+        safely(() => client.assets.update(assetId, { name }, { signal: ctx.mcpReq.signal })),
+    );
+
+    server.registerTool(
+      "spicyapi_asset_delete",
+      {
+        title: "Delete a saved SpicyAPI asset",
+        description:
+          "Permanently delete one asset from the library this key reaches. Its spicy://a/<id> uri stops working in new requests at once and the stored file is removed; there is no undo. In a team library, developers can delete only what they saved. " +
+          "Deleting does not give back today's allowance of new assets. Only delete an asset the user named. Requires a user confirmation round.",
+        inputSchema: z.object({ assetId: assetIdSchema }).strict(),
+        outputSchema: resultOf(assetDeletedSchema),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async (args, ctx) =>
+        requireUserConfirmation(
+          "delete_asset",
+          args,
+          ctx,
+          `Permanently delete asset ${args.assetId} from your asset library?`,
+          async () => client.assets.delete(args.assetId, { signal: ctx.mcpReq.signal }),
+        ),
+    );
+
+    server.registerTool(
+      "spicyapi_assets_usage_get",
+      {
+        title: "Get SpicyAPI asset library plan and usage",
+        description:
+          "Return which library the key reaches (scope), the storage plan, what is stored against its limits, how many assets were saved today against the daily limit, and the next plan with how much more to top up. " +
+          "Usage covers the owner's whole allowance, shared by their personal and team libraries; the top-up amounts are absent when scope.canTopUp is false. " +
+          "Plans unlock with lifetime top-ups and never go down; byte values use binary units (500 MB = 524288000 bytes). Use it to explain a refused save.",
+        inputSchema: emptySchema,
+        outputSchema: resultOf(assetUsageSchema),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async (_args, ctx) => safely(() => client.assets.usage({ signal: ctx.mcpReq.signal })),
+    );
+
+    const characterUsage =
+      "To use a character, put the uri (spicy://a/<id>) of its images, in the order given, into the reference image field of the model's input (spicyapi_model_get shows which field), and refer to them in the prompt the way that model's page describes. " +
+      "Characters are created and edited on the web; these tools only read them. Older spicy://p/<id> persona references still resolve to the same images, in the personal library only.";
+
+    server.registerTool(
+      "spicyapi_characters_list",
+      {
+        title: "List SpicyAPI characters",
+        description:
+          "List the characters in the asset library this key reaches: named sets of images, each image an asset with its own uri. Newest first, one page at a time; pass nextCursor back as cursor to continue. " +
+          "Pass assetId to find the characters that contain one asset. " +
+          characterUsage,
+        inputSchema: z
+          .object({
+            assetId: assetIdSchema
+              .optional()
+              .describe("Only the characters that contain this asset (ast_… or spicy://a/<id>)."),
+            cursor: z.string().min(1).optional(),
+            limit: z.number().int().min(1).max(100).default(20),
+          })
+          .strict(),
+        outputSchema: resultOf(characterListSchema),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async ({ assetId, cursor, limit }, ctx) =>
+        safely(() =>
+          client.assets.characters.list({
+            ...(assetId === undefined ? {} : { assetId }),
+            ...(cursor === undefined ? {} : { cursor }),
+            limit,
+            signal: ctx.mcpReq.signal,
+          }),
+        ),
+    );
+
+    server.registerTool(
+      "spicyapi_character_get",
+      {
+        title: "Get a SpicyAPI character",
+        description:
+          "Read one character with its images in order, each with its uri and a fresh private previewUrl (signed for at most 20 minutes; never store it). An unknown character and one outside this key's library both return 404. " +
+          characterUsage,
+        inputSchema: z
+          .object({
+            characterId: z
+              .string()
+              .min(1)
+              .max(40)
+              .describe("The character id from spicyapi_characters_list."),
+          })
+          .strict(),
+        outputSchema: resultOf(characterSchema),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async ({ characterId }, ctx) =>
+        safely(() => client.assets.characters.get(characterId, { signal: ctx.mcpReq.signal })),
+    );
+
     server.registerResource(
       "spicyapi-documentation-index",
       "spicyapi://docs/index",
@@ -1178,7 +1639,7 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
             role: "user",
             content: {
               type: "text",
-              text: `Goal: ${goal}\n${model ? `Candidate model: ${model}\n` : ""}Use spicyapi_models_list to discover a model, then spicyapi_model_get only if its full live input schema is not already available. Do not invent fields. Call spicyapi_task_create directly: it obtains the exact quote and requests confirmation of the USD estimate and maximum charge. Use the separate quote tool only for price comparisons, and health/balance tools only when requested or diagnosing a problem. Preserve the logical idempotency key and accepted task ID. Prefer a verified webhook for long tasks; otherwise use bounded task_wait. A complete verified v2 webhook needs no extra task_get. Use ready output.assets[].url directly without sending the API key to storage; poll only for pending assets or expired URLs. Copy durable results to storage the user controls.`,
+              text: `Goal: ${goal}\n${model ? `Candidate model: ${model}\n` : ""}Use spicyapi_models_list to discover a model, then spicyapi_model_get only if its full live input schema is not already available. Do not invent fields. Call spicyapi_task_create directly: it obtains the exact quote and requests confirmation of the USD estimate and maximum charge. Use the separate quote tool only for price comparisons, and health/balance tools only when requested or diagnosing a problem. Preserve the logical idempotency key and accepted task ID. Prefer a verified webhook for long tasks; otherwise use bounded task_wait. A complete verified v2 webhook needs no extra task_get. Use ready output.assets[].url directly without sending the API key to storage; poll only for pending assets or expired URLs. Copy durable results to storage the user controls, or save the ones to reuse with spicyapi_asset_save and pass their spicy://a/ uri later; when the user mentions a file they saved before, find it with spicyapi_assets_list.`,
             },
           },
         ],

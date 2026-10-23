@@ -161,13 +161,25 @@ void test("a 404 from /readyz on the public surface is not reported as a fault, 
       /404/,
       "the tool description never mentions the /readyz 404, leaving consumers to guess",
     );
-    assert.match(statusTool.description ?? "", /operational/, "the tool description does not say which field to report");
+    assert.match(
+      statusTool.description ?? "",
+      /operational/,
+      "the tool description does not say which field to report",
+    );
 
     // 2. The output schema has to carry the explanation too - descriptions travel to the model with
     //    the schema.
     const schemaText = JSON.stringify(statusTool.outputSchema ?? {});
-    assert.match(schemaText, /admin process/, "the outputSchema does not explain where the 404 comes from");
-    assert.match(schemaText, /503/, "the outputSchema does not say what genuine unreadiness looks like");
+    assert.match(
+      schemaText,
+      /admin process/,
+      "the outputSchema does not explain where the 404 comes from",
+    );
+    assert.match(
+      schemaText,
+      /503/,
+      "the outputSchema does not say what genuine unreadiness looks like",
+    );
 
     // 3. The conclusion itself: a 404 must not make operational false.
     const result = await connection.client.callTool({
@@ -307,7 +319,11 @@ void test("usage tool preserves key scope, UTC filters and exact settled USD wit
       assert.deepEqual(JSON.parse(content.text), report);
     }
     assert.deepEqual(paths, ["/api/v1/usage", "/api/v1/usage?from=2026-08-31&to=2026-09-07"]);
-    assert.deepEqual(messages, [], "a read-only usage query must not trigger a spending confirmation");
+    assert.deepEqual(
+      messages,
+      [],
+      "a read-only usage query must not trigger a spending confirmation",
+    );
 
     for (const args of [
       { userId: "other-user" },
@@ -322,7 +338,11 @@ void test("usage tool preserves key scope, UTC filters and exact settled USD wit
       });
       assert.equal(rejected.isError, true);
     }
-    assert.equal(paths.length, 2, "an identity override or an invalid date must not trigger an API request");
+    assert.equal(
+      paths.length,
+      2,
+      "an identity override or an invalid date must not trigger an API request",
+    );
 
     const rangeError = await connection.client.callTool({
       name: "spicyapi_usage_get",
@@ -333,7 +353,11 @@ void test("usage tool preserves key scope, UTC filters and exact settled USD wit
     assert.ok(errorContent?.type === "text");
     assert.match(errorContent.text, /req_usage_range/);
     assert.match(errorContent.text, /92 days/);
-    assert.equal(paths.length, 3, "the server rules on the date range; it is neither split nor widened automatically");
+    assert.equal(
+      paths.length,
+      3,
+      "the server rules on the date range; it is neither split nor widened automatically",
+    );
   } finally {
     await connection.close();
   }
@@ -545,7 +569,10 @@ void test("a confirmed retry really goes out, carrying the idempotency key and t
     const sent = requests[0];
     assert.ok(sent?.url.endsWith("/jobs/retry"), String(sent?.url));
     assert.match(sent?.body ?? "", /job_failed/, "the request body carries no source task id");
-    assert.ok(sent?.idempotencyKey, "the retry carried no Idempotency-Key - a timeout resend would become a second billable task");
+    assert.ok(
+      sent?.idempotencyKey,
+      "the retry carried no Idempotency-Key - a timeout resend would become a second billable task",
+    );
 
     const structured = result.structuredContent as {
       result?: {
@@ -556,7 +583,11 @@ void test("a confirmed retry really goes out, carrying the idempotency key and t
       };
     };
     assert.equal(structured.result?.taskId, "job_retried");
-    assert.equal(structured.result?.sourceTaskId, "job_failed", "the new task does not point back at the one it retried");
+    assert.equal(
+      structured.result?.sourceTaskId,
+      "job_failed",
+      "the new task does not point back at the one it retried",
+    );
     assert.equal(structured.result?.estimatedCost, "0.42");
     assert.equal(
       structured.result?.idempotencyKey,
@@ -918,7 +949,11 @@ void test("the task listing is scoped to the current key over the protocol, keep
       });
       assert.equal(result.isError, true);
     }
-    assert.equal(urls.length, 2, "invalid arguments must not reach the API, and neither paging nor result reading happens automatically");
+    assert.equal(
+      urls.length,
+      2,
+      "invalid arguments must not reach the API, and neither paging nor result reading happens automatically",
+    );
   } finally {
     await connection.close();
   }

@@ -1,6 +1,6 @@
 {
   "name": "@spicyapi/mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Official local MCP server for the SpicyAPI public API",
   "type": "module",
   "license": "MIT",
@@ -10,7 +10,7 @@
   },
   "homepage": "https://spicyapi.ai",
   "bugs": {
-    "url": "https://github.com/spicyapi-ai/spicy-mcp/issues"
+    "url": "https://spicyapi.ai/contact"
   },
   "publishConfig": {
     "access": "public"
@@ -52,7 +52,7 @@
   "dependencies": {
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "@spicyapi/sdk": "^0.7.0",
+    "@spicyapi/sdk": "^0.9.0",
     "zod": "4.5.4"
   },
   "devDependencies": {
