@@ -5,6 +5,11 @@ name: Release to npm
 # provenance attestation automatically, which a token-based publish does not get.
 on:
   workflow_dispatch:
+    inputs:
+      registry_only:
+        description: "Register an already-published npm version without publishing it again"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,6 +37,7 @@ jobs:
       # Skip when the version already exists, so re-running this workflow is safe rather than a
       # failure.
       - name: Publish if this version is new
+        if: ${{ !inputs.registry_only }}
         run: |
           NAME=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
@@ -57,6 +63,20 @@ jobs:
             --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" "$archive"
           tar xzf "$archive" mcp-publisher
+      - name: Wait for npm public availability
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          for attempt in $(seq 1 40); do
+            if npm view "$NAME@$VERSION" version --silent > /dev/null 2>&1; then
+              echo "$NAME@$VERSION is publicly available."
+              exit 0
+            fi
+            echo "Waiting for npm to finish processing $NAME@$VERSION ($attempt/40)."
+            sleep 15
+          done
+          echo "npm has not made the version public yet; do not republish the staged version."
+          exit 1
       - name: Publish official MCP Registry metadata
         run: |
           ./mcp-publisher login github-oidc
