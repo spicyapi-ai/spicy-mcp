@@ -1,5 +1,11 @@
 # @spicyapi/mcp
 
+## 0.6.1
+
+### Patch Changes
+
+- Add official MCP Registry ownership metadata and a default `mcp` binary alias for npm-based registry clients. Existing binaries and API behavior are unchanged.
+
 ## 0.6.0
 
 ### Minor Changes

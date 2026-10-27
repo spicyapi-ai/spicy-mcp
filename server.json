@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.spicyapi-ai/mcp",
+  "title": "SpicyAPI MCP",
+  "description": "Image, video and audio generation APIs with USD quotes and confirmation before paid requests.",
+  "version": "0.6.1",
+  "websiteUrl": "https://spicyapi.ai/",
+  "repository": {
+    "url": "https://github.com/spicyapi-ai/spicy-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@spicyapi/mcp",
+      "version": "0.6.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SPICY_API_KEY",
+          "description": "Your SpicyAPI API key. Hosted inference uses prepaid USD usage billing.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

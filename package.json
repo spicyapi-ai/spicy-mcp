@@ -1,6 +1,6 @@
 {
   "name": "@spicyapi/mcp",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Official local MCP server for the SpicyAPI public API",
   "type": "module",
   "license": "MIT",
@@ -36,7 +36,8 @@
   },
   "bin": {
     "spicyapi-mcp": "dist/src/mcp/stdio.js",
-    "spicyapi-mcp-http": "dist/src/mcp/http.js"
+    "spicyapi-mcp-http": "dist/src/mcp/http.js",
+    "mcp": "dist/src/mcp/stdio.js"
   },
   "files": [
     "dist/src",
@@ -60,5 +61,6 @@
     "@types/node": "26.4.0",
     "prettier": "3.9.6",
     "typescript": "5.9.3"
-  }
+  },
+  "mcpName": "io.github.spicyapi-ai/mcp"
 }
