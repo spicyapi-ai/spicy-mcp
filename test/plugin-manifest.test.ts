@@ -59,3 +59,14 @@ void test("mcp.json launches the binary this package actually ships", () => {
     `mcp.json should invoke one of the binaries in package.json: ${binaries.join(", ")}`,
   );
 });
+
+void test("server.json names the published package and version for the MCP Registry", () => {
+  // The official registry rejects a server.json whose name does not match package.json's
+  // mcpName, and a version left behind after a bump publishes stale metadata.
+  const serverJson = readJson("server.json");
+  assert.equal(serverJson["name"], packageJson["mcpName"]);
+  assert.equal(serverJson["version"], packageJson["version"]);
+  const packages = serverJson["packages"] as Array<Record<string, unknown>>;
+  assert.equal(packages[0]?.["identifier"], packageJson["name"]);
+  assert.equal(packages[0]?.["version"], packageJson["version"]);
+});
