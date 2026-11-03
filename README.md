@@ -336,8 +336,14 @@ and explicit link renewal, and its signed URL lasts 20 minutes.
 Some models answer in `output.text` rather than with a file — audio transcription is the plain case,
 an ordinary asynchronous task whose result is words. An empty `output.assets` on such a model is the
 expected shape, not a failure, so report the text instead of looking for a missing link. A
-transcription may also carry `output.transcript` with word timings and the detected language, and
-layer decomposition returns one image per layer, stacked by `output.assets[].layer.zIndex`.
+transcription may also carry `output.transcript` with word timings, timed `segments` and the
+detected language, and layer decomposition returns one image per layer, stacked by
+`output.assets[].layer.zIndex`. Embedding models return vectors in `output.embeddings`; when they
+add up to more than 2,048 numbers, `spicyapi_task_get` and `spicyapi_task_wait` replace each vector
+with its length and first eight values and say so in `output.embeddings.summary` — read the full
+vectors with the SDK, the CLI or `POST /v1/embeddings`. Image-to-3D and text-to-3D return one `mesh`
+asset (a `.glb` file), vector models return `image/svg+xml` images, and video translation can add a
+`subtitle` asset (`.srt`).
 
 `spicyapi_task_wait` polls adaptively by default, starting at about two seconds and backing off to
 at most ten. Set `intervalSeconds` only for a fixed interval. Waiting is bounded to 60 seconds by
@@ -542,7 +548,12 @@ tool to add. The catalogue's text models are served by the compatible layers ins
 `POST /v1/chat/completions` and `POST /v1/responses` (OpenAI), `POST /v1/messages` (Anthropic) and
 `POST /v1beta/models/{model}:generateContent` (Google Gemini), all under `https://api.spicyapi.ai` —
 so a client that already speaks one of those protocols only needs its base URL pointed at SpicyAPI.
-Use native `jobs/stream` when you need quote confirmation and the platform event envelope — see the
+Embedding and text-to-speech models also answer at `POST /v1/embeddings` and
+`POST /v1/audio/speech`. Live voice and live transcription use the
+`wss://api.spicyapi.ai/v1/realtime` WebSocket, which a tool call cannot hold open; a task created
+here runs a single bounded turn instead — see the
+[realtime guide](https://docs.spicyapi.ai/docs/realtime-audio). Use native `jobs/stream` when you
+need quote confirmation and the platform event envelope — see the
 [chat streaming guide](https://docs.spicyapi.ai/docs/quotes-and-compatibility).
 
 Text models that read images, video or audio take them as message parts, and the `spicy://f/…` URI

@@ -270,8 +270,66 @@ const confirmedRetryTaskResultSchema = retryTaskResultSchema.extend({ idempotenc
    that only knew about output.assets[].url reported finished transcriptions as having produced
    nothing. The shapes come from the contract's TaskOutput, TaskTranscript and TaskOutputAsset.layer. */
 const TEXT_AND_LAYER_RESULTS =
-  "Some models answer in words instead of a file: speech-to-text and other text results arrive in output.text with no assets, and a transcription may add output.transcript with word timings and the detected language. " +
-  "Layer decomposition returns one image asset per layer; stack them by ascending output.assets[].layer.zIndex.";
+  "Some models answer in words instead of a file: speech-to-text and other text results arrive in output.text with no assets, and a transcription may add output.transcript with word timings, timed segments (output.transcript.segments, with speaker labels when available) and the detected language. " +
+  "Embedding models return vectors in output.embeddings (inputTokens and data[].index/embedding); large results are summarized here, see output.embeddings.summary. " +
+  "Layer decomposition returns one image asset per layer; stack them by ascending output.assets[].layer.zIndex. " +
+  "Other asset roles: image-to-3d and text-to-3d return one `mesh` asset (a binary glTF .glb, mime model/gltf-binary); vector endpoints return `image` assets with mime image/svg+xml; video translation can add a `subtitle` asset (.srt); video extension that joins the source clip returns the joined `video` first and the new part as `segment`.";
+
+/* Models whose catalog tasks are `realtime` or `realtime-transcription` are live-audio models: a task
+   created here runs one bounded turn from the input schema (a text prompt or a short audio file),
+   while continuous microphone audio needs the server-side WebSocket, which an MCP tool cannot hold
+   open. Embedding and speech models also have OpenAI-compatible routes that return the vectors or
+   audio bytes directly. */
+const REALTIME_AND_COMPATIBLE_ROUTES =
+  "Models with task `realtime` or `realtime-transcription` take one bounded turn as a task from their input schema; live, continuous audio needs a server-side WebSocket to wss://api.spicyapi.ai/v1/realtime, which this server does not open. " +
+  "Embedding models (task `embedding`) and text-to-speech models are also served by OpenAI-compatible POST /v1/embeddings and POST /v1/audio/speech for applications that want vectors or audio bytes directly.";
+
+/* An embedding task can return up to 128 vectors of 3072 floats each - several megabytes of JSON
+   that would land wholesale in the agent's context and say nothing an agent can read. Up to this
+   many floats in total the vectors pass through unchanged; above it each vector is replaced by its
+   length and first few values, and the full result stays available through the SDK, the CLI or
+   POST /v1/embeddings. */
+const EMBEDDING_FLOAT_LIMIT = 2048;
+const EMBEDDING_PREVIEW_LENGTH = 8;
+
+function compactEmbeddings(task: unknown): unknown {
+  if (task === null || typeof task !== "object") return task;
+  const output = (task as { output?: unknown }).output;
+  if (output === null || typeof output !== "object") return task;
+  const embeddings = (output as { embeddings?: unknown }).embeddings;
+  if (embeddings === null || typeof embeddings !== "object") return task;
+  const data = (embeddings as { data?: unknown }).data;
+  if (!Array.isArray(data)) return task;
+  const vectorOf = (item: unknown): unknown[] | undefined => {
+    const vector = (item as { embedding?: unknown } | null)?.embedding;
+    return Array.isArray(vector) ? vector : undefined;
+  };
+  const floats = data.reduce<number>((total, item) => total + (vectorOf(item)?.length ?? 0), 0);
+  if (floats <= EMBEDDING_FLOAT_LIMIT) return task;
+  const compacted = data.map((item: unknown) => {
+    const vector = vectorOf(item);
+    if (vector === undefined) return item;
+    const rest = Object.fromEntries(
+      Object.entries(item as Record<string, unknown>).filter(([key]) => key !== "embedding"),
+    );
+    return {
+      ...rest,
+      dimensions: vector.length,
+      preview: vector.slice(0, EMBEDDING_PREVIEW_LENGTH),
+    };
+  });
+  return {
+    ...task,
+    output: {
+      ...output,
+      embeddings: {
+        ...embeddings,
+        data: compacted,
+        summary: `${data.length} vector(s), ${floats} floats in total, are too large for this result; each item lists its dimensions and first ${EMBEDDING_PREVIEW_LENGTH} values. Read the full vectors with the SDK getTask, the CLI, or POST /v1/embeddings.`,
+      },
+    },
+  };
+}
 
 function resultOf<T extends z.ZodType>(result: T): z.ZodObject<{ result: T }> {
   return z.object({ result });
@@ -814,7 +872,8 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
           "Discover enabled models and account-specific prices. Fetch only the selected model for its schema, or set includeSchema to reuse complete records without another model_get call. " +
           "Returned input schemas are plain JSON Schema; display-only and rate-card annotations are removed. " +
           "Some input values change the price; task_create obtains the exact request quote for confirmation. " +
-          "Use pricing entries for comparisons rather than calculating the accepted charge yourself.",
+          "Use pricing entries for comparisons rather than calculating the accepted charge yourself. " +
+          REALTIME_AND_COMPATIBLE_ROUTES,
         inputSchema: z.object({
           modality: z.enum(["image", "video", "audio", "text"]).optional(),
           provider: z.string().optional(),
@@ -979,7 +1038,9 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
         },
       },
       async ({ taskId }, ctx) =>
-        safely(() => client.getTask(taskId, { signal: ctx.mcpReq.signal })),
+        safely(async () =>
+          compactEmbeddings(await client.getTask(taskId, { signal: ctx.mcpReq.signal })),
+        ),
     );
 
     server.registerTool(
@@ -1011,12 +1072,14 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
         },
       },
       async ({ taskId, intervalSeconds, timeoutSeconds }, ctx) =>
-        safely(() =>
-          client.waitForTask(taskId, {
-            ...(intervalSeconds === undefined ? {} : { intervalMs: intervalSeconds * 1_000 }),
-            timeoutMs: timeoutSeconds * 1_000,
-            signal: ctx.mcpReq.signal,
-          }),
+        safely(async () =>
+          compactEmbeddings(
+            await client.waitForTask(taskId, {
+              ...(intervalSeconds === undefined ? {} : { intervalMs: intervalSeconds * 1_000 }),
+              timeoutMs: timeoutSeconds * 1_000,
+              signal: ctx.mcpReq.signal,
+            }),
+          ),
         ),
     );
 
@@ -1138,7 +1201,8 @@ export function createSpicyMcpFactory(options: SpicyMcpFactoryOptions = {}): Mcp
         title: "Create a billable SpicyAPI task",
         description:
           "Obtain the exact request quote, show its USD estimate and maximum charge for user confirmation, then reserve funds and create an asynchronous task. Do not call task_quote first unless independently comparing prices. " +
-          "The confirmation needs an MCP client that supports form elicitation; if the client does not, the call fails after the free quote and no task is created or charged.",
+          "The confirmation needs an MCP client that supports form elicitation; if the client does not, the call fails after the free quote and no task is created or charged. " +
+          REALTIME_AND_COMPATIBLE_ROUTES,
         inputSchema: createTaskSchema,
         outputSchema: resultOf(confirmedCreateTaskResultSchema),
         annotations: {

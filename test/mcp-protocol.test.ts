@@ -1314,3 +1314,104 @@ void test("task results that are text, transcripts or layers are described where
     await connection.close();
   }
 });
+
+void test("large embedding results are summarized and small ones pass through", async () => {
+  // An embedding task can return 128 vectors of 3072 floats; that much JSON in a tool result fills
+  // the agent's context with numbers it cannot use. Small results stay intact.
+  const vectors = (count: number, dimensions: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      index,
+      embedding: Array.from({ length: dimensions }, (_, position) => position / dimensions),
+    }));
+  for (const [count, dimensions, summarized] of [
+    [2, 8, false],
+    [4, 1536, true],
+  ] as const) {
+    const connection = await connectMcp({
+      client: apiClient(() =>
+        Promise.resolve(
+          Response.json({
+            code: 200,
+            msg: "success",
+            request_id: "req_embedding",
+            data: {
+              taskId: "job_embedding",
+              model: "example/embedding-model/embedding",
+              state: "succeeded",
+              cost: "0.000001",
+              settled: true,
+              createdAt: "2026-11-03T00:00:00Z",
+              output: { embeddings: { inputTokens: 3, data: vectors(count, dimensions) } },
+            },
+          }),
+        ),
+      ),
+      stateSecret: "0123456789abcdef0123456789abcdef",
+    });
+    try {
+      const result = await connection.client.callTool({
+        name: "spicyapi_task_get",
+        arguments: { taskId: "job_embedding" },
+      });
+      assert.equal(result.isError, undefined);
+      const embeddings = (
+        result.structuredContent as {
+          result: {
+            output: {
+              embeddings: {
+                inputTokens: number;
+                summary?: string;
+                data: Array<{
+                  index: number;
+                  embedding?: number[];
+                  dimensions?: number;
+                  preview?: number[];
+                }>;
+              };
+            };
+          };
+        }
+      ).result.output.embeddings;
+      assert.equal(embeddings.inputTokens, 3);
+      assert.equal(embeddings.data.length, count);
+      if (summarized) {
+        assert.match(embeddings.summary ?? "", /\/v1\/embeddings/);
+        for (const item of embeddings.data) {
+          assert.equal(item.embedding, undefined);
+          assert.equal(item.dimensions, dimensions);
+          assert.equal(item.preview?.length, 8);
+        }
+        const text = (result.content as Array<{ text: string }>)[0]?.text ?? "";
+        assert.ok(text.length < 10_000, `summarized result is still ${text.length} characters`);
+      } else {
+        assert.equal(embeddings.summary, undefined);
+        assert.equal(embeddings.data[1]?.embedding?.length, dimensions);
+      }
+    } finally {
+      await connection.close();
+    }
+  }
+});
+
+void test("catalog and task creation say where realtime, embedding and speech models are served", async () => {
+  const connection = await connectMcp({
+    client: apiClient(() => Promise.reject(new Error("API must not be called"))),
+    stateSecret: "0123456789abcdef0123456789abcdef",
+  });
+  try {
+    const tools = (await connection.client.listTools()).tools;
+    for (const name of ["spicyapi_models_list", "spicyapi_task_create"]) {
+      const description = tools.find((tool) => tool.name === name)?.description ?? "";
+      assert.match(description, /wss:\/\/api\.spicyapi\.ai\/v1\/realtime/, name);
+      assert.match(description, /\/v1\/embeddings/, name);
+      assert.match(description, /\/v1\/audio\/speech/, name);
+    }
+    for (const name of ["spicyapi_task_get", "spicyapi_task_wait"]) {
+      const description = tools.find((tool) => tool.name === name)?.description ?? "";
+      for (const term of [/output\.embeddings/, /segments/, /mesh/, /image\/svg\+xml/, /subtitle/])
+        assert.match(description, term, `${name} does not mention ${String(term)}`);
+    }
+  } finally {
+    await connection.close();
+  }
+});

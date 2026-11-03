@@ -3,7 +3,7 @@
   "name": "io.github.spicyapi-ai/mcp",
   "title": "SpicyAPI MCP",
   "description": "Image, video and audio generation APIs with USD quotes and confirmation before paid requests.",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "websiteUrl": "https://spicyapi.ai/",
   "repository": {
     "url": "https://github.com/spicyapi-ai/spicy-mcp",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@spicyapi/mcp",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "transport": {
         "type": "stdio"
       },
